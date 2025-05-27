@@ -9,6 +9,9 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 import pandas as pd
 
+# 🔐 secrets에서 firebase_config 불러오기
+firebase_json = json.loads(st.secrets["firebase_config"])
+
 # Firebase 초기화
 if not firebase_admin._apps:
     cred = credentials.Certificate("firebase-service-account.json")
