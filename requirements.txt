@@ -3,3 +3,4 @@ firebase-admin
 pandas
 openpyxl
 streamlit-webrtc
+pyzbar
