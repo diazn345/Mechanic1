@@ -104,7 +104,7 @@ if menu == "보고서 제출":
         except Exception as e:
             st.error(f"저장 실패: {e}")
 
-    # === [여기] 보고서 내역 보기 (관리자: 전체, 일반: 본인 것만) ===
+    # === 보고서 내역 보기 (관리자: 전체, 일반: 본인 것만) ===
     st.markdown("### 📋 제출된 수리 보고서")
     if st.session_state.is_admin:
         reports_query = db.collection("repair_reports").stream()
@@ -204,7 +204,7 @@ if menu == "고장 대수 입력":
                 for row in count_data:
                     db.collection("issue_counts").add(row)
                 st.success(f"{camp} 고장 대수 저장 완료")
-            # === [여기] 고장대수 내역 보기 (관리자: 전체, 일반: 본인 것만) ===
+            # === 고장대수 내역 보기 (관리자: 전체, 일반: 본인 것만) ===
             st.markdown(f"### 📋 {camp} 고장대수 내역")
             if st.session_state.is_admin:
                 my_counts = db.collection("issue_counts").where("camp", "==", camp).where("date", "==", date_str).stream()
@@ -243,3 +243,36 @@ if menu == "통계 조회":
             grouped = df.groupby("issue")["count"].sum().reset_index()
         st.dataframe(grouped)
         st.bar_chart(grouped.set_index(grouped.columns[0]))
+
+        # === 📅 하루치 고장대수 상세 조회 (관리자 전용) ===
+        if st.session_state.is_admin:
+            st.markdown("---")
+            st.subheader("🔍 하루치 고장대수 상세 조회 (관리자 전용)")
+            selected_date = st.date_input("조회 날짜 선택", value=date.today(), key="조회용날짜")
+            camp_options = sorted(df["camp"].dropna().unique())
+            if not camp_options:
+                st.info("등록된 캠프 데이터가 없습니다.")
+            else:
+                selected_camp = st.selectbox("캠프 선택", camp_options, key="조회용캠프")
+
+                # 1️⃣ 각 캠프별·기기종류별 합계
+                if st.button("기기별 합계로 보기"):
+                    day_df = df[(df["date"] == selected_date.strftime("%Y-%m-%d")) & (df["camp"] == selected_camp)]
+                    if not day_df.empty:
+                        pivot = day_df.groupby("device")["count"].sum().reset_index()
+                        pivot.columns = ["기기종류", "총 대수"]
+                        st.markdown(f"#### {selected_date.strftime('%Y-%m-%d')} {selected_camp} 캠프 기기별 합계")
+                        st.dataframe(pivot)
+                    else:
+                        st.info("데이터 없음")
+
+                # 2️⃣ 입력양식(모든 device/issue row 전체)로 보기
+                if st.button("입력양식대로 상세보기"):
+                    day_df = df[(df["date"] == selected_date.strftime("%Y-%m-%d")) & (df["camp"] == selected_camp)]
+                    if not day_df.empty:
+                        table = day_df[["device", "issue", "count"]]
+                        table = table.sort_values(by=["device", "issue"])
+                        st.markdown(f"#### {selected_date.strftime('%Y-%m-%d')} {selected_camp} 캠프 상세 입력내역")
+                        st.dataframe(table)
+                    else:
+                        st.info("데이터 없음")
