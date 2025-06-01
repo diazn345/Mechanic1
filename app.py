@@ -5,10 +5,10 @@ from firebase_admin import credentials, firestore
 import pandas as pd
 import re
 
-# 🔑 관리자 비밀번호 (실전에서는 환경변수 등으로 관리!)
+# 🔑 관리자 비밀번호 (실전에서는 환경변수 등으로 분리 권장)
 ADMIN_PASSWORD = "admin123"
 
-# Firestore 인증
+# Firestore 인증 (Cloud 호환)
 if not firebase_admin._apps:
     firebase_cred_dict = dict(st.secrets["FIREBASE_CRED"])
     cred = credentials.Certificate(firebase_cred_dict)
@@ -52,7 +52,7 @@ if not st.session_state.is_logged_in:
         if st.button("일반 사용자로 로그인"):
             st.session_state.is_logged_in = True
             st.session_state.user_name = name
-            st.experimental_rerun()
+            st.rerun()
     with tab2:
         pw = st.text_input("관리자 비밀번호", type="password")
         if st.button("관리자로 로그인"):
@@ -61,7 +61,7 @@ if not st.session_state.is_logged_in:
                 st.session_state.is_logged_in = True
                 st.session_state.user_name = "관리자"
                 st.success("관리자 로그인 성공! 메뉴가 열렸습니다.")
-                st.experimental_rerun()
+                st.rerun()
             else:
                 st.error("비밀번호가 틀렸습니다.")
     st.stop()
@@ -78,7 +78,7 @@ if menu == "로그아웃":
     st.session_state.is_admin = False
     st.session_state.user_name = ""
     st.success("로그아웃 되었습니다.")
-    st.experimental_rerun()
+    st.rerun()
 
 # === 메뉴별 화면 ===
 if menu == "보고서 제출":
@@ -141,12 +141,12 @@ if menu == "보고서 수정/삭제" and st.session_state.is_admin:
                 "parts": new_parts,
             })
             st.success("✅ 수정 완료")
-            st.experimental_rerun()
+            st.rerun()
 
         if st.button("삭제"):
             db.collection("repair_reports").document(selected_report["id"]).delete()
             st.success("🗑️ 삭제 완료")
-            st.experimental_rerun()
+            st.rerun()
     else:
         st.info("선택한 작성자의 보고서가 없습니다.")
 
