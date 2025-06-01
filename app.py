@@ -67,12 +67,12 @@ if not st.session_state.is_logged_in:
                 st.error("비밀번호가 틀렸습니다.")
     st.stop()
 
-# === 메뉴(모두 동일 메뉴) ===
+# === 메뉴 (옵션관리 포함) ===
 st.sidebar.title("메뉴")
-menu = st.sidebar.radio(
-    "메뉴 선택",
-    ["보고서 제출", "보고서 수정/삭제", "고장 대수 입력", "통계 조회", "로그아웃"]
-)
+side_menus = ["보고서 제출", "보고서 수정/삭제", "고장 대수 입력", "통계 조회", "로그아웃"]
+if st.session_state.is_admin:
+    side_menus.insert(-1, "옵션 관리")
+menu = st.sidebar.radio("메뉴 선택", side_menus)
 
 if menu == "로그아웃":
     st.session_state.is_logged_in = False
@@ -305,3 +305,30 @@ if menu == "통계 조회":
                 file_name=f"camp_stats_{date_str}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
+
+# === 옵션 관리 ===
+if menu == "옵션 관리" and st.session_state.is_admin:
+    st.title("⚙️ 옵션 관리 (드롭다운 내용 실시간 수정)")
+    option_tabs = st.tabs(["작성자", "고장내용", "부품명"])
+    option_keys = ["authors", "issues", "parts"]
+    for tab, key in zip(option_tabs, option_keys):
+        with tab:
+            st.subheader(f"{key} 관리")
+            doc_ref = db.collection("options").document(key)
+            data = doc_ref.get().to_dict() or {}
+            current_list = data.get(key, [])
+            new_value = st.text_input(f"새 {key[:-1]} 입력", key=f"input_{key}")
+            if st.button(f"{key} 추가", key=f"add_{key}"):
+                if new_value and new_value not in current_list:
+                    new_list = current_list + [new_value]
+                    doc_ref.set({key: new_list})
+                    st.success(f"{new_value} 추가됨!")
+                    st.experimental_rerun()
+            delete_item = st.selectbox(f"삭제할 {key[:-1]} 선택", [""] + current_list, key=f"del_{key}")
+            if st.button(f"{key} 삭제", key=f"delete_{key}"):
+                if delete_item and delete_item in current_list:
+                    new_list = [v for v in current_list if v != delete_item]
+                    doc_ref.set({key: new_list})
+                    st.warning(f"{delete_item} 삭제됨!")
+                    st.experimental_rerun()
+            st.markdown(f"**현재 목록:** {', '.join(current_list)}")
