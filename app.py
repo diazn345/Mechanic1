@@ -5,8 +5,8 @@ from firebase_admin import credentials, firestore
 import pandas as pd
 import re
 
-# 🔑 관리자 비밀번호 (실전에서는 환경변수 등으로 분리 권장)
-ADMIN_PASSWORD = "admin123"
+# 🔑 관리자 비밀번호 (여기만 바꿔주세요!)
+ADMIN_PASSWORD = "eogns2951!"
 
 # Firestore 인증 (Cloud 호환)
 if not firebase_admin._apps:
