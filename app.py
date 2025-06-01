@@ -5,10 +5,10 @@ from firebase_admin import credentials, firestore
 import pandas as pd
 import re
 
-# 🔑 관리자 비밀번호 (여기만 바꿔주세요!)
+# 🔑 관리자 비밀번호
 ADMIN_PASSWORD = "eogns2951!"
 
-# Firestore 인증 (Cloud 호환)
+# Firestore 인증
 if not firebase_admin._apps:
     firebase_cred_dict = dict(st.secrets["FIREBASE_CRED"])
     cred = credentials.Certificate(firebase_cred_dict)
@@ -66,12 +66,12 @@ if not st.session_state.is_logged_in:
                 st.error("비밀번호가 틀렸습니다.")
     st.stop()
 
-# === 메뉴 및 권한 ===
+# === 메뉴(모두 동일 메뉴) ===
 st.sidebar.title("메뉴")
-if st.session_state.is_admin:
-    menu = st.sidebar.radio("메뉴 선택", ["보고서 제출", "보고서 수정/삭제", "고장 대수 입력", "통계 조회", "로그아웃"])
-else:
-    menu = st.sidebar.radio("메뉴 선택", ["보고서 제출", "로그아웃"])
+menu = st.sidebar.radio(
+    "메뉴 선택",
+    ["보고서 제출", "보고서 수정/삭제", "고장 대수 입력", "통계 조회", "로그아웃"]
+)
 
 if menu == "로그아웃":
     st.session_state.is_logged_in = False
@@ -80,7 +80,7 @@ if menu == "로그아웃":
     st.success("로그아웃 되었습니다.")
     st.rerun()
 
-# === 메뉴별 화면 ===
+# === 보고서 제출 ===
 if menu == "보고서 제출":
     st.title("🔧 수리 보고서 제출")
     name = st.session_state.user_name
@@ -104,7 +104,26 @@ if menu == "보고서 제출":
         except Exception as e:
             st.error(f"저장 실패: {e}")
 
-if menu == "보고서 수정/삭제" and st.session_state.is_admin:
+    # === [여기] 보고서 내역 보기 (관리자: 전체, 일반: 본인 것만) ===
+    st.markdown("### 📋 제출된 수리 보고서")
+    if st.session_state.is_admin:
+        reports_query = db.collection("repair_reports").stream()
+        reports_list = [doc.to_dict() for doc in reports_query]
+    else:
+        reports_query = db.collection("repair_reports").where("author", "==", name).stream()
+        reports_list = [doc.to_dict() for doc in reports_query]
+    if reports_list:
+        df = pd.DataFrame(reports_list)
+        if st.session_state.is_admin:
+            df = df[["author", "equipment_id", "issue", "parts", "created_at"]]
+        else:
+            df = df[["equipment_id", "issue", "parts", "created_at"]]
+        st.dataframe(df)
+    else:
+        st.info("제출된 보고서가 없습니다.")
+
+# === 보고서 수정/삭제 ===
+if menu == "보고서 수정/삭제":
     st.title("✏️ 보고서 수정 및 삭제")
 
     selected_name = st.selectbox("작성자 선택", authors)
@@ -150,7 +169,8 @@ if menu == "보고서 수정/삭제" and st.session_state.is_admin:
     else:
         st.info("선택한 작성자의 보고서가 없습니다.")
 
-if menu == "고장 대수 입력" and st.session_state.is_admin:
+# === 고장 대수 입력 ===
+if menu == "고장 대수 입력":
     st.title("🏕 캠프별 고장 대수 입력")
     camps = ["내유캠프", "독산캠프", "장안캠프"]
     devices = ["S9", "디어", "W1", "W9", "I9"]
@@ -174,7 +194,8 @@ if menu == "고장 대수 입력" and st.session_state.is_admin:
                         "camp": camp,
                         "device": device,
                         "issue": issue,
-                        "count": count
+                        "count": count,
+                        "author": st.session_state.user_name   # 작성자 정보 저장
                     })
             if st.button(f"{camp} 저장", key=f"save_{camp}"):
                 existing = db.collection("issue_counts").where("date", "==", date_str).where("camp", "==", camp).stream()
@@ -183,8 +204,26 @@ if menu == "고장 대수 입력" and st.session_state.is_admin:
                 for row in count_data:
                     db.collection("issue_counts").add(row)
                 st.success(f"{camp} 고장 대수 저장 완료")
+            # === [여기] 고장대수 내역 보기 (관리자: 전체, 일반: 본인 것만) ===
+            st.markdown(f"### 📋 {camp} 고장대수 내역")
+            if st.session_state.is_admin:
+                my_counts = db.collection("issue_counts").where("camp", "==", camp).where("date", "==", date_str).stream()
+                my_counts_list = [doc.to_dict() for doc in my_counts]
+            else:
+                my_counts = db.collection("issue_counts").where("camp", "==", camp).where("author", "==", st.session_state.user_name).where("date", "==", date_str).stream()
+                my_counts_list = [doc.to_dict() for doc in my_counts]
+            if my_counts_list:
+                df = pd.DataFrame(my_counts_list)
+                if st.session_state.is_admin:
+                    df = df[["author", "date", "device", "issue", "count"]]
+                else:
+                    df = df[["date", "device", "issue", "count"]]
+                st.dataframe(df)
+            else:
+                st.info(f"{camp} 캠프에 내역이 없습니다.")
 
-if menu == "통계 조회" and st.session_state.is_admin:
+# === 통계 조회 ===
+if menu == "통계 조회":
     st.title("📊 고장 통계")
     issue_data = db.collection("issue_counts").stream()
     records = [doc.to_dict() for doc in issue_data]
