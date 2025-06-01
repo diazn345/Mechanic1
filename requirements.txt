@@ -1,6 +1,7 @@
 streamlit
 firebase-admin
 pandas
-openpyxl
 streamlit-webrtc
+opencv-python-headless
 pyzbar
+numpy
