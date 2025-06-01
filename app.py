@@ -113,7 +113,8 @@ if menu == "보고서 제출":
         reports_list = [doc.to_dict() for doc in all_reports]
         if reports_list:
             df = pd.DataFrame(reports_list)
-            df["created_at"] = pd.to_datetime(df["created_at"])
+            df["created_at"] = pd.to_datetime(df["created_at"], errors="coerce")
+            df = df.dropna(subset=["created_at"])
             df = df.sort_values("created_at", ascending=False)
             df["날짜"] = df["created_at"].dt.date.astype(str)
             # 필터 UI
