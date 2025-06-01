@@ -4,11 +4,12 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 import pandas as pd
 import re
+import io
 
-# 🔑 관리자 비밀번호
+# 🔑 관리자 비밀번호 (여기만 바꿔주세요!)
 ADMIN_PASSWORD = "eogns2951!"
 
-# Firestore 인증
+# Firestore 인증 (Cloud 호환)
 if not firebase_admin._apps:
     firebase_cred_dict = dict(st.secrets["FIREBASE_CRED"])
     cred = credentials.Certificate(firebase_cred_dict)
@@ -244,35 +245,63 @@ if menu == "통계 조회":
         st.dataframe(grouped)
         st.bar_chart(grouped.set_index(grouped.columns[0]))
 
-        # === 📅 하루치 고장대수 상세 조회 (관리자 전용) ===
-        if st.session_state.is_admin:
-            st.markdown("---")
-            st.subheader("🔍 하루치 고장대수 상세 조회 (관리자 전용)")
-            selected_date = st.date_input("조회 날짜 선택", value=date.today(), key="조회용날짜")
-            camp_options = sorted(df["camp"].dropna().unique())
-            if not camp_options:
-                st.info("등록된 캠프 데이터가 없습니다.")
-            else:
-                selected_camp = st.selectbox("캠프 선택", camp_options, key="조회용캠프")
+        # === [NEW] 모든 기종·세련된 포맷·엑셀 다운로드 ===
+        st.markdown("---")
+        st.subheader("🔍 [ALL] 캠프별·기기별 고장내역 요약 및 엑셀 다운로드")
+        selected_date = st.date_input("조회 날짜", value=date.today(), key="엑셀다운캠프날짜")
+        date_str = selected_date.strftime("%Y-%m-%d")
+        date_df = df[df["date"] == date_str]
+        if date_df.empty:
+            st.info("선택한 날짜 데이터 없음")
+        else:
+            # 1. 캠프별·기기별 총 대수(세로: 캠프, 가로: 기종)
+            total_pivot = date_df.pivot_table(index="camp", columns="device", values="count", aggfunc="sum", fill_value=0)
+            st.markdown("#### [1] 캠프별·기기별 총 대수 테이블")
+            st.dataframe(total_pivot.astype(int))
 
-                # 1️⃣ 각 캠프별·기기종류별 합계
-                if st.button("기기별 합계로 보기"):
-                    day_df = df[(df["date"] == selected_date.strftime("%Y-%m-%d")) & (df["camp"] == selected_camp)]
-                    if not day_df.empty:
-                        pivot = day_df.groupby("device")["count"].sum().reset_index()
-                        pivot.columns = ["기기종류", "총 대수"]
-                        st.markdown(f"#### {selected_date.strftime('%Y-%m-%d')} {selected_camp} 캠프 기기별 합계")
-                        st.dataframe(pivot)
-                    else:
-                        st.info("데이터 없음")
+            # 세련된 요약 텍스트
+            st.markdown("#### [1-2] 캠프별·기기별 텍스트 요약")
+            for camp, row in total_pivot.iterrows():
+                dev_list = [f"{dev} {int(row[dev])}대" for dev in total_pivot.columns if row[dev] > 0]
+                if dev_list:
+                    st.write(f"**{camp}** - " + " , ".join(dev_list))
+                else:
+                    st.write(f"**{camp}** - 데이터 없음")
 
-                # 2️⃣ 입력양식(모든 device/issue row 전체)로 보기
-                if st.button("입력양식대로 상세보기"):
-                    day_df = df[(df["date"] == selected_date.strftime("%Y-%m-%d")) & (df["camp"] == selected_camp)]
-                    if not day_df.empty:
-                        table = day_df[["device", "issue", "count"]]
-                        table = table.sort_values(by=["device", "issue"])
-                        st.markdown(f"#### {selected_date.strftime('%Y-%m-%d')} {selected_camp} 캠프 상세 입력내역")
-                        st.dataframe(table)
-                    else:
-                        st.info("데이터 없음")
+            # 2. 캠프별·기기별·고장별 상세 (multiindex pivot)
+            st.markdown("#### [2] 캠프별·기기별·고장별 상세 테이블")
+            detail_pivot = date_df.pivot_table(
+                index=["camp", "device"], columns="issue", values="count", aggfunc="sum", fill_value=0
+            )
+            st.dataframe(detail_pivot.astype(int))
+
+            # 세련된 텍스트 요약 (ex. 내유캠프 - S9 - 모터 3대, 컨트롤러 2대 ...)
+            st.markdown("#### [2-2] 캠프별·기기별·고장별 텍스트 요약")
+            for (camp, device), row in detail_pivot.iterrows():
+                detail_list = [f"{issue} {int(row[issue])}대" for issue in detail_pivot.columns if row[issue] > 0]
+                if detail_list:
+                    st.write(f"**{camp}** - {device} - " + ", ".join(detail_list))
+                else:
+                    st.write(f"**{camp}** - {device} - 데이터 없음")
+
+            # 3. 엑셀/CSV 다운로드 (상세)
+            st.markdown("#### [3] 전체 상세 내역 엑셀/CSV 다운로드")
+            # '캠프, 기종, 고장내용, 대수' 단일 표로 export
+            download_df = date_df[["camp", "device", "issue", "count"]].sort_values(by=["camp", "device", "issue"])
+            csv_data = download_df.to_csv(index=False, encoding="utf-8-sig")
+            st.download_button(
+                label="⬇️ CSV 다운로드",
+                data=csv_data,
+                file_name=f"camp_stats_{date_str}.csv",
+                mime="text/csv"
+            )
+            # 엑셀(xlsx)도 지원
+            excel_buffer = io.BytesIO()
+            with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as writer:
+                download_df.to_excel(writer, index=False, sheet_name="고장통계")
+            st.download_button(
+                label="⬇️ 엑셀(xlsx) 다운로드",
+                data=excel_buffer.getvalue(),
+                file_name=f"camp_stats_{date_str}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
