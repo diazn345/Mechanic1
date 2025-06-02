@@ -114,6 +114,7 @@ if menu == "보고서 수정/삭제":
     st.title("✏️ 보고서 수정 및 삭제")
     author_list = AUTHORS if st.session_state.is_admin else [st.session_state.user_name]
     selected_name = st.selectbox("작성자 선택", author_list)
+
     @st.cache_data(ttl=60)
     def fetch_my_reports(name):
         return [{"id": doc.id, **doc.to_dict()}
@@ -122,37 +123,54 @@ if menu == "보고서 수정/삭제":
                 .order_by("created_at", direction=firestore.Query.DESCENDING)
                 .limit(50).stream()]
     reports = fetch_my_reports(selected_name)
+
     if reports:
-        display_list = []
-        for r in reports:
-            created_at_str = r["created_at"]
-            try: created_at_str = pd.to_datetime(created_at_str).strftime("%Y-%m-%d %H:%M")
-            except: pass
-            display_list.append(f"{r['equipment_id']} / {r['issue']} / {created_at_str} / {r['id'][:6]}")
-        selected_display = st.selectbox("보고서 선택", display_list)
-        selected_report = next(r for r, d in zip(reports, display_list) if d == selected_display)
-        new_equipment = st.text_input("장비 ID", value=selected_report["equipment_id"])
-        new_issue = st.selectbox("고장 내용", ISSUES, index=ISSUES.index(selected_report["issue"]) if selected_report["issue"] in ISSUES else 0)
-        new_parts = []
-        for i in range(10):
-            current_part = selected_report["parts"][i] if i < len(selected_report["parts"]) else ""
-            options_list = [""] + PARTS
-            index = options_list.index(current_part) if current_part in options_list else 0
-            part = st.selectbox(f"사용 부품 {i+1}", options_list, index=index, key=f"edit_part_{i}")
-            new_parts.append(part)
-        new_parts = [p for p in new_parts if p]
-        if st.button("수정 저장"):
-            db.collection("repair_reports").document(selected_report["id"]).update({
-                "equipment_id": new_equipment,
-                "issue": new_issue,
-                "parts": new_parts,
-            })
-            st.success("✅ 수정 완료")
-            st.rerun()
-        if st.button("삭제"):
-            db.collection("repair_reports").document(selected_report["id"]).delete()
-            st.success("🗑️ 삭제 완료")
-            st.rerun()
+        df = pd.DataFrame(reports)
+        df["created_at_str"] = pd.to_datetime(df["created_at"]).dt.strftime("%Y-%m-%d %H:%M")
+        df["parts_str"] = df["parts"].apply(lambda x: ", ".join(x) if isinstance(x, list) else str(x))
+
+        # 🔍 검색 필터
+        search = st.text_input("🔍 장비ID/고장내용/부품/날짜로 검색", "")
+        if search:
+            mask = df.apply(lambda row: search in row["equipment_id"]
+                                         or search in row["issue"]
+                                         or search in row["parts_str"]
+                                         or search in row["created_at_str"], axis=1)
+            df = df[mask]
+
+        # 목록 옵션
+        option_list = [
+            f"{r['equipment_id']} / {r['issue']} / {r['created_at_str']} / {r['id'][:6]}"
+            for _, r in df.iterrows()
+        ]
+        if option_list:
+            selected_display = st.selectbox("수정/삭제할 보고서 선택", option_list)
+            selected_report = next(r for r, d in zip(reports, option_list) if d == selected_display)
+
+            new_equipment = st.text_input("장비 ID", value=selected_report["equipment_id"])
+            new_issue = st.selectbox("고장 내용", ISSUES, index=ISSUES.index(selected_report["issue"]) if selected_report["issue"] in ISSUES else 0)
+            new_parts = []
+            for i in range(10):
+                current_part = selected_report["parts"][i] if i < len(selected_report["parts"]) else ""
+                options_list = [""] + PARTS
+                index = options_list.index(current_part) if current_part in options_list else 0
+                part = st.selectbox(f"사용 부품 {i+1}", options_list, index=index, key=f"edit_part_{i}")
+                new_parts.append(part)
+            new_parts = [p for p in new_parts if p]
+            if st.button("수정 저장"):
+                db.collection("repair_reports").document(selected_report["id"]).update({
+                    "equipment_id": new_equipment,
+                    "issue": new_issue,
+                    "parts": new_parts,
+                })
+                st.success("✅ 수정 완료")
+                st.rerun()
+            if st.button("삭제"):
+                db.collection("repair_reports").document(selected_report["id"]).delete()
+                st.success("🗑️ 삭제 완료")
+                st.rerun()
+        else:
+            st.info("검색 결과가 없습니다.")
     else:
         st.info("선택한 작성자의 보고서가 없습니다.")
 
@@ -165,7 +183,6 @@ if menu == "고장 대수 입력":
     for tab, camp in zip(tabs, CAMPS):
         with tab:
             st.subheader(f"{camp}")
-            # --- 기존 데이터 캐싱 및 미리 채우기 ---
             @st.cache_data(ttl=120)
             def fetch_issue_counts(date_str, camp, user, is_admin):
                 q = db.collection("issue_counts").where("date", "==", date_str).where("camp", "==", camp)
@@ -208,8 +225,8 @@ if menu == "고장 대수 입력":
                 st.info(f"{camp} 캠프에 내역이 없습니다.")
 
 # ========== 통계 조회 ==========
-if menu == "통계 조회":
-    st.title("📊 고장 통계")
+if menu == "통계 조회" and st.session_state.is_admin:
+    st.title("📊 고장 통계 (관리자 전용)")
     # **최근 30일치만 캐싱**
     min_date = (date.today() - timedelta(days=30)).strftime("%Y-%m-%d")
     @st.cache_data(ttl=120)
@@ -234,28 +251,30 @@ if menu == "통계 조회":
         st.bar_chart(grouped.set_index(grouped.columns[0]))
 
         # === 🔍 하루치 상세 포맷 ===
-        if st.session_state.is_admin:
-            st.markdown("---")
-            st.subheader("🔍 하루치 고장대수 상세 조회 (관리자 전용)")
-            sel_date = st.date_input("조회 날짜 선택", value=date.today(), key="조회용날짜")
-            camp_options = sorted(df["camp"].dropna().unique())
-            if camp_options:
-                sel_camp = st.selectbox("캠프 선택", camp_options, key="조회용캠프")
-                day_df = df[(df["date"] == sel_date.strftime("%Y-%m-%d")) & (df["camp"] == sel_camp)]
-                # 🎯 1️⃣ 기기별 총합(엑셀 양식)
-                if st.button("기기별 합계로 보기"):
-                    result = day_df.groupby("device")["count"].sum().reset_index()
-                    result.columns = ["기기종류", "총 대수"]
-                    st.dataframe(result)
-                # 🎯 2️⃣ 기기별 + 이슈별 트리형 표 (계층/포맷)
-                if st.button("입력양식대로 상세보기"):
-                    for device in DEVICES:
-                        device_df = day_df[day_df["device"] == device]
-                        total = device_df["count"].sum()
-                        st.markdown(f"**- {device} 총합: {total}대**")
-                        for issue in ISSUES_COUNT:
-                            row = device_df[device_df["issue"] == issue]
-                            if not row.empty and int(row['count'].values[0]) > 0:
-                                st.markdown(f"&emsp;• {issue}: {int(row['count'].values[0])}대")
-                    if day_df.empty:
-                        st.info("데이터 없음")
+        st.markdown("---")
+        st.subheader("🔍 하루치 고장대수 상세 조회 (관리자 전용)")
+        sel_date = st.date_input("조회 날짜 선택", value=date.today(), key="조회용날짜")
+        camp_options = sorted(df["camp"].dropna().unique())
+        if camp_options:
+            sel_camp = st.selectbox("캠프 선택", camp_options, key="조회용캠프")
+            day_df = df[(df["date"] == sel_date.strftime("%Y-%m-%d")) & (df["camp"] == sel_camp)]
+            # 🎯 1️⃣ 기기별 총합(엑셀 양식)
+            if st.button("기기별 합계로 보기"):
+                result = day_df.groupby("device")["count"].sum().reset_index()
+                result.columns = ["기기종류", "총 대수"]
+                st.dataframe(result)
+            # 🎯 2️⃣ 기기별 + 이슈별 트리형 표 (계층/포맷)
+            if st.button("입력양식대로 상세보기"):
+                for device in DEVICES:
+                    device_df = day_df[day_df["device"] == device]
+                    total = device_df["count"].sum()
+                    st.markdown(f"**- {device} 총합: {total}대**")
+                    for issue in ISSUES_COUNT:
+                        row = device_df[device_df["issue"] == issue]
+                        if not row.empty and int(row['count'].values[0]) > 0:
+                            st.markdown(f"&emsp;• {issue}: {int(row['count'].values[0])}대")
+                if day_df.empty:
+                    st.info("데이터 없음")
+
+# --- END ---
+
